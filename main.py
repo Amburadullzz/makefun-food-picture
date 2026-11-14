@@ -1,59 +1,55 @@
-# entry for make.fun
 #!/usr/bin/env python3
-"""Copy entry.png from this script's directory to $MAKEFUN_OUTPUT_DIR/entry.png.
+"""Copy the food picture that sits beside this script to <output>/entry.png.
 
-Standard library only (Python 3.13+). The source image is resolved relative to
-this file via os.path.dirname(os.path.abspath(__file__)), the destination
-directory is created when missing, and the bytes are copied verbatim so the
-output is byte-identical to the source and fully deterministic.
+Standard library only, no network, deterministic: the bytes of the source file
+are copied verbatim, so two runs write the same file.
+
+Output directory: $MAKEFUN_OUTPUT_DIR when set, otherwise /output.
 """
 
-from __future__ import annotations
-
-import hashlib
 import os
 import shutil
 import sys
 
 SOURCE_NAME = "entry.png"
 DEFAULT_OUTPUT_DIR = "/output"
-CHUNK_SIZE = 1 << 20
+MAX_BYTES = 1048576  # 1 MiB: the largest entry file make.fun accepts
 
 
-def sha256_file(path: str) -> str:
-    """Return the hex SHA-256 digest of a file."""
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def fail(message: str) -> int:
+    """Print an error to stderr and return a failing exit status."""
+    print(f"error: {message}", file=sys.stderr)
+    return 1
 
 
 def main() -> int:
-    source = os.path.join(os.path.dirname(os.path.abspath(__file__)), SOURCE_NAME)
-    output_dir = os.environ.get("MAKEFUN_OUTPUT_DIR") or DEFAULT_OUTPUT_DIR
-    destination = os.path.join(output_dir, SOURCE_NAME)
+    here = os.path.dirname(os.path.abspath(__file__))
+    source = os.path.join(here, SOURCE_NAME)
 
     if not os.path.isfile(source):
-        print(f"error: source image not found: {source}", file=sys.stderr)
-        return 1
+        return fail(f"source picture not found: {source}")
 
+    source_size = os.path.getsize(source)
+    if source_size > MAX_BYTES:
+        return fail(
+            f"source picture is {source_size} bytes, over the {MAX_BYTES} byte limit"
+        )
+
+    output_dir = os.environ.get("MAKEFUN_OUTPUT_DIR") or DEFAULT_OUTPUT_DIR
+    # os.makedirs makes the intermediate directories itself, as
+    # Path.mkdir(parents=True, exist_ok=True) would: there is no "parents"
+    # keyword on os.makedirs.
     os.makedirs(output_dir, exist_ok=True)
 
-    # copyfile writes the raw bytes only: no metadata, no re-encoding.
+    destination = os.path.join(output_dir, SOURCE_NAME)
     shutil.copyfile(source, destination)
 
-    source_hash = sha256_file(source)
-    destination_hash = sha256_file(destination)
-    if source_hash != destination_hash:
-        print(
-            f"error: copy mismatch ({source_hash} != {destination_hash})",
-            file=sys.stderr,
-        )
-        return 1
+    written = os.path.getsize(destination)
+    if written > MAX_BYTES:
+        os.remove(destination)
+        return fail(f"wrote {written} bytes, over the {MAX_BYTES} byte limit")
 
-    size = os.path.getsize(destination)
-    print(f"wrote {destination} ({size} bytes, sha256 {destination_hash})")
+    print(f"wrote {destination} ({written} bytes)")
     return 0
 
 
